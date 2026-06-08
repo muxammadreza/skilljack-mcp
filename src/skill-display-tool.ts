@@ -28,7 +28,7 @@ import { SkillState } from "./skill-tool.js";
 /**
  * Resource URI for the skill-display UI.
  */
-const RESOURCE_URI = "ui://skill-display/skill-display.html";
+const RESOURCE_URI = "ui://skill-display/v1/skill-display.html";
 
 /**
  * Get the path to the bundled UI HTML file.
@@ -388,6 +388,17 @@ export function registerSkillDisplayTool(
             uri: RESOURCE_URI,
             mimeType: RESOURCE_MIME_TYPE,
             text: html,
+            _meta: {
+              ui: {
+                prefersBorder: true,
+                domain: "https://skilljack.dev",
+                csp: {
+                  connectDomains: [],
+                  resourceDomains: [],
+                },
+              },
+              "openai/widgetDescription": "View available skills and configure invocation settings for Skilljack.",
+            },
           },
         ],
       };

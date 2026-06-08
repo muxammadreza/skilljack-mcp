@@ -12,9 +12,8 @@ describe("getToolDescription", () => {
       createTestSkill({ name: "my-skill", description: "Does things", effectiveAssistantInvocable: true }),
     ]);
     const desc = getToolDescription(state);
-    expect(desc).toContain("Load a skill");
-    expect(desc).toContain("<name>my-skill</name>");
-    expect(desc).toContain("<description>Does things</description>");
+    expect(desc).toContain("Load and activate");
+    expect(desc).toContain("my-skill");
   });
 
   it("excludes skills with effectiveAssistantInvocable false", () => {
@@ -23,8 +22,8 @@ describe("getToolDescription", () => {
       createTestSkill({ name: "hidden", effectiveAssistantInvocable: false }),
     ]);
     const desc = getToolDescription(state);
-    expect(desc).toContain("<name>visible</name>");
-    expect(desc).not.toContain("<name>hidden</name>");
+    expect(desc).toContain("visible");
+    expect(desc).not.toContain("hidden");
   });
 });
 

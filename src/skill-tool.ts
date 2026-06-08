@@ -13,7 +13,7 @@ import * as path from "node:path";
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { SkillMetadata, loadSkillContent, generateInstructions, getModelInvocableSkills } from "./skill-discovery.js";
+import { SkillMetadata, loadSkillContent, getModelInvocableSkills } from "./skill-discovery.js";
 
 /**
  * Shared state for dynamic skill management.
@@ -45,17 +45,15 @@ const SkillSchema = z.object({
  * Exported so index.ts can use it when refreshing skills.
  */
 export function getToolDescription(skillState: SkillState): string {
-  const usage =
-    "Load a skill's full instructions. Returns the complete SKILL.md content " +
-    "with step-by-step guidance, examples, and file references to follow.\n\n" +
-    "IMPORTANT: When a skill is relevant to the user's task, you must invoke this tool " +
-    "IMMEDIATELY as your first action. NEVER just announce or mention a skill without " +
-    "actually calling this tool. This is a BLOCKING REQUIREMENT: invoke this tool BEFORE " +
-    "generating any other response about the task.\n\n";
-
   const allSkills = Array.from(skillState.skillMap.values());
   const modelInvocableSkills = getModelInvocableSkills(allSkills);
-  return usage + generateInstructions(modelInvocableSkills);
+  return (
+    "Load and activate a skill's full instructions by name. " +
+    "Returns the complete SKILL.md content with step-by-step guidance, " +
+    "examples, and file references. Call this tool as your first action " +
+    "when a user's task matches a skill's description.\n\n" +
+    `Available skills: ${modelInvocableSkills.map((s) => s.name).join(", ")}`
+  );
 }
 
 export function registerSkillTool(
@@ -68,6 +66,11 @@ export function registerSkillTool(
       title: "Activate Skill",
       description: getToolDescription(skillState),
       inputSchema: SkillSchema,
+      outputSchema: {
+        name: z.string(),
+        baseName: z.string(),
+        description: z.string(),
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -93,14 +96,19 @@ export function registerSkillTool(
       }
 
       try {
-        const content = loadSkillContent(skill.path);
+        const text = loadSkillContent(skill.path);
         return {
           content: [
             {
               type: "text",
-              text: content,
+              text,
             },
           ],
+          structuredContent: {
+            name: skill.name,
+            baseName: skill.baseName,
+            description: skill.description,
+          },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -111,6 +119,10 @@ export function registerSkillTool(
               text: `Failed to load skill "${name}": ${message}`,
             },
           ],
+          structuredContent: {
+            name,
+            error: message,
+          },
           isError: true,
         };
       }
@@ -227,6 +239,12 @@ function registerSkillResourceTool(
         "Use when skill instructions mention specific files to read or copy. " +
         "Pass a directory path (e.g., 'templates') to read all files in that directory at once.",
       inputSchema: SkillResourceSchema,
+      outputSchema: {
+        skill: z.string(),
+        path: z.string(),
+        fileCount: z.number().optional(),
+        fileNames: z.array(z.string()).optional(),
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -247,6 +265,11 @@ function registerSkillResourceTool(
               text: `Skill "${skillName}" not found. Available skills: ${availableSkills || "none"}`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: "Skill not found",
+          },
           isError: true,
         };
       }
@@ -265,6 +288,12 @@ function registerSkillResourceTool(
                 text: `No resource files found in skill "${skillName}". The skill only contains SKILL.md.`,
               },
             ],
+            structuredContent: {
+              skill: skillName,
+              path: resourcePath || "",
+              fileCount: 0,
+              fileNames: [],
+            },
           };
         }
         return {
@@ -274,6 +303,12 @@ function registerSkillResourceTool(
               text: `Available resources in skill "${skillName}":\n\n${files.map((f) => `- ${f}`).join("\n")}`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath || "",
+            fileCount: files.length,
+            fileNames: files,
+          },
         };
       }
 
@@ -288,6 +323,11 @@ function registerSkillResourceTool(
               text: `Invalid path: "${resourcePath}" is outside the skill directory. Use relative paths like "scripts/example.py" or "references/guide.md".`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: "Path traversal blocked",
+          },
           isError: true,
         };
       }
@@ -303,6 +343,11 @@ function registerSkillResourceTool(
               text: `Resource "${resourcePath}" not found in skill "${skillName}".\n\nAvailable files:\n- ${suggestions}${files.length > 10 ? `\n... and ${files.length - 10} more` : ""}`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: "File not found",
+          },
           isError: true,
         };
       }
@@ -319,6 +364,11 @@ function registerSkillResourceTool(
               text: `Cannot read symlink "${resourcePath}". Only regular files within the skill directory are accessible.`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: "Symlink rejected",
+          },
           isError: true,
         };
       }
@@ -334,6 +384,12 @@ function registerSkillResourceTool(
                 text: `Directory "${resourcePath}" is empty or contains no readable files.`,
               },
             ],
+            structuredContent: {
+              skill: skillName,
+              path: resourcePath,
+              fileCount: 0,
+              fileNames: [],
+            },
           };
         }
 
@@ -363,7 +419,15 @@ function registerSkillResourceTool(
           }
         }
 
-        return { content: contents };
+        return {
+          content: contents,
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            fileCount: files.length,
+            fileNames: files,
+          },
+        };
       }
 
       // Check file size to prevent memory exhaustion
@@ -377,6 +441,12 @@ function registerSkillResourceTool(
               text: `File "${resourcePath}" is too large (${sizeMB}MB). Maximum allowed size is ${maxMB}MB.`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: "File too large",
+            size: stat.size,
+          },
           isError: true,
         };
       }
@@ -390,6 +460,11 @@ function registerSkillResourceTool(
               text: `Access denied: "${resourcePath}" resolves to a location outside the skill directory.`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: "Path traversal blocked (realpath)",
+          },
           isError: true,
         };
       }
@@ -404,6 +479,12 @@ function registerSkillResourceTool(
               text: content,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            fileCount: 1,
+            fileNames: [resourcePath],
+          },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -414,6 +495,11 @@ function registerSkillResourceTool(
               text: `Failed to read resource "${resourcePath}": ${message}`,
             },
           ],
+          structuredContent: {
+            skill: skillName,
+            path: resourcePath,
+            error: message,
+          },
           isError: true,
         };
       }

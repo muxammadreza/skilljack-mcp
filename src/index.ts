@@ -563,6 +563,11 @@ async function main() {
       version: "1.0.0",
     },
     {
+      instructions:
+        "Use the skill tool to load skill instructions when a user's task matches a skill's description. " +
+        "First call the skill tool with the matching skill name, then follow the step-by-step instructions it returns. " +
+        "Use skill-resource to read supporting files (scripts, templates, references) within a skill directory. " +
+        "Consult skill://index.json to discover all available skills and their descriptions.",
       capabilities: {
         tools: { listChanged: !isStatic },
         resources: { subscribe: true, listChanged: true },

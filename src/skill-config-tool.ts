@@ -37,7 +37,7 @@ import { isGitHubUrl, parseGitHubUrl } from "./github-config.js";
 /**
  * Resource URI for the skill-config UI.
  */
-const RESOURCE_URI = "ui://skill-config/mcp-app.html";
+const RESOURCE_URI = "ui://skill-config/v1/mcp-app.html";
 
 /**
  * Get the path to the bundled UI HTML file.
@@ -580,6 +580,17 @@ export function registerSkillConfigTool(
             uri: RESOURCE_URI,
             mimeType: RESOURCE_MIME_TYPE,
             text: html,
+            _meta: {
+              ui: {
+                prefersBorder: true,
+                domain: "https://skilljack.dev",
+                csp: {
+                  connectDomains: [],
+                  resourceDomains: [],
+                },
+              },
+              "openai/widgetDescription": "Configure skill directories and GitHub sources for Skilljack.",
+            },
           },
         ],
       };
