@@ -238,15 +238,45 @@ function notFound(res: ServerResponse): void {
   jsonResponse(res, 404, { error: "not_found" });
 }
 
-type SkilljackServerFactory = () => Promise<McpServer>;
-
-interface HttpSession {
+interface RegisteredSkilljackServer {
   server: McpServer;
+  skillTool: RegisteredTool;
+  promptRegistry: PromptRegistry;
+  subscriptionManager: SubscriptionManager;
+  dispose?: () => void;
+}
+
+type SkilljackServerFactory = () => Promise<RegisteredSkilljackServer>;
+
+interface HttpSession extends RegisteredSkilljackServer {
   transport: StreamableHTTPServerTransport;
 }
 
 function getHeaderValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+async function readJsonRequestBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+
+  if (chunks.length === 0) {
+    return undefined;
+  }
+
+  return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+}
+
+function isInitializeMessage(body: unknown): boolean {
+  if (Array.isArray(body)) {
+    return body.some(isInitializeMessage);
+  }
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+  return (body as { method?: unknown }).method === "initialize";
 }
 
 async function handleHttpRequest(
@@ -271,8 +301,29 @@ async function handleHttpRequest(
 
   const sessionId = getHeaderValue(req.headers["mcp-session-id"]);
   let session = sessionId ? sessions.get(sessionId) : undefined;
+  let parsedBody: unknown | undefined;
 
   if (!session && req.method === "POST") {
+    try {
+      parsedBody = await readJsonRequestBody(req);
+    } catch {
+      jsonResponse(res, 400, {
+        jsonrpc: "2.0",
+        error: { code: -32700, message: "Parse error" },
+        id: null,
+      });
+      return;
+    }
+
+    if (!isInitializeMessage(parsedBody)) {
+      jsonResponse(res, 400, {
+        jsonrpc: "2.0",
+        error: { code: -32000, message: "Bad Request: No valid MCP session ID provided" },
+        id: null,
+      });
+      return;
+    }
+
     session = await createHttpSession(sessions, createServerForSession);
   }
 
@@ -285,7 +336,7 @@ async function handleHttpRequest(
     return;
   }
 
-  await session.transport.handleRequest(req, res);
+  await session.transport.handleRequest(req, res, parsedBody);
 }
 
 async function createHttpSession(
@@ -299,16 +350,17 @@ async function createHttpSession(
       sessions.set(sessionId, session);
     },
   });
-  const server = await createServerForSession();
-  session = { server, transport };
+  const registeredServer = await createServerForSession();
+  session = { ...registeredServer, transport };
 
   transport.onclose = () => {
     if (transport.sessionId) {
       sessions.delete(transport.sessionId);
     }
+    registeredServer.dispose?.();
   };
 
-  await server.connect(transport);
+  await registeredServer.server.connect(transport);
   return session;
 }
 
@@ -525,17 +577,11 @@ function refreshSkills(
  * Watches for SKILL.md additions, modifications, and deletions.
  *
  * @param skillsDirs - The configured skill directories
- * @param server - The MCP server instance
- * @param skillTool - The registered skill tool to update
- * @param promptRegistry - For refreshing skill prompts
- * @param subscriptionManager - For refreshing subscriptions
+ * @param onChange - Callback that refreshes all active MCP server instances.
  */
 function watchSkillDirectories(
   skillsDirs: string[],
-  server: McpServer,
-  skillTool: RegisteredTool,
-  promptRegistry: PromptRegistry,
-  subscriptionManager: SubscriptionManager
+  onChange: () => void
 ): void {
   let refreshTimeout: NodeJS.Timeout | null = null;
 
@@ -545,7 +591,7 @@ function watchSkillDirectories(
     }
     refreshTimeout = setTimeout(() => {
       refreshTimeout = null;
-      refreshSkills(skillsDirs, server, skillTool, promptRegistry, subscriptionManager);
+      onChange();
     }, SKILL_REFRESH_DEBOUNCE_MS);
   };
 
@@ -621,11 +667,6 @@ function watchSkillDirectories(
     debouncedRefresh();
   });
 }
-
-/**
- * Subscription manager for resource file watching.
- */
-const subscriptionManager = createSubscriptionManager();
 
 async function main() {
   // Check if static mode is enabled
@@ -723,112 +764,157 @@ async function main() {
   console.error(`Discovered ${skills.length} skill(s)`);
   warnLargeSkillCount(skills.length);
 
-  // Create the MCP server
-  // In static mode, disable listChanged for tools/prompts (skills list is frozen)
-  // Resource subscriptions remain dynamic for individual skill file watching
-  const server = new McpServer(
-    {
-      name: "skilljack-mcp",
-      version: "1.0.0",
-    },
-    {
-      instructions:
-        "Use the skill tool to load skill instructions when a user's task matches a skill's description. " +
-        "First call the skill tool with the matching skill name, then follow the step-by-step instructions it returns. " +
-        "Use skill-resource to read supporting files (scripts, templates, references) within a skill directory. " +
-        "Consult skill://index.json to discover all available skills and their descriptions.",
-      capabilities: {
-        tools: { listChanged: !isStatic },
-        resources: { subscribe: true, listChanged: true },
-        prompts: { listChanged: !isStatic },
-        // SEP-2640 (Skills Extension): https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2640
-        extensions: {
-          "io.modelcontextprotocol/skills": {},
-          "io.modelcontextprotocol/ui": {},
-        },
-      },
+  const registeredServers = new Set<RegisteredSkilljackServer>();
+
+  const refreshSharedSkillState = () => {
+    let refreshedSkills = discoverSkillsFromDirs(currentSkillsDirs, currentSourceMap);
+    const overrides = getSkillInvocationOverrides();
+    refreshedSkills = applyInvocationOverrides(refreshedSkills, overrides);
+    skillState.skillMap = createSkillMap(refreshedSkills);
+    warnLargeSkillCount(refreshedSkills.length);
+  };
+
+  const refreshRegisteredServer = (registeredServer: RegisteredSkilljackServer) => {
+    refreshSkills(
+      currentSkillsDirs,
+      registeredServer.server,
+      registeredServer.skillTool,
+      registeredServer.promptRegistry,
+      registeredServer.subscriptionManager
+    );
+  };
+
+  const refreshAllServers = () => {
+    if (registeredServers.size === 0) {
+      refreshSharedSkillState();
+      return;
     }
-  );
 
-  // Register tools, resources, and prompts
-  const skillTool = registerSkillTool(server, skillState);
-  registerSkillResources(server, skillState);
-  const promptRegistry = registerSkillPrompts(server, skillState);
+    for (const registeredServer of registeredServers) {
+      refreshRegisteredServer(registeredServer);
+    }
+  };
 
-  // Register subscription handlers for resource file watching
-  registerSubscriptionHandlers(server, skillState, subscriptionManager);
-
-  // Register skill-config tool for UI-based directory configuration
-  // Skip in static mode since skills list is frozen
-  if (!isStatic) {
-    registerSkillConfigTool(server, skillState, async () => {
-      // Callback when directories or GitHub settings change via UI
-      // Reload directories from config and refresh skills
-      const newPaths = getActiveDirectories();
-      const { localDirs: newLocalDirs, githubSpecs: newGithubSpecs } = classifyPaths(newPaths);
-
-      // Get fresh GitHub config (in case allowed orgs/users changed)
-      const freshGithubConfig = getGitHubConfig();
-
-      // Filter GitHub specs by allowlist and sync
-      const allowedGithubSpecs: GitHubRepoSpec[] = [];
-      for (const spec of newGithubSpecs) {
-        if (isRepoAllowed(spec, freshGithubConfig)) {
-          allowedGithubSpecs.push(spec);
-        } else {
-          console.error(`Blocked: ${spec.owner}/${spec.repo} not in allowed orgs/users.`);
-        }
+  const createRegisteredServer = async (): Promise<RegisteredSkilljackServer> => {
+    // Create a fresh MCP protocol/server instance for each transport connection.
+    // The MCP SDK Protocol object owns exactly one transport, so Streamable HTTP
+    // sessions must not share one McpServer instance.
+    const server = new McpServer(
+      {
+        name: "skilljack-mcp",
+        version: "1.0.0",
+      },
+      {
+        instructions:
+          "Use the skill tool to load skill instructions when a user's task matches a skill's description. " +
+          "First call the skill tool with the matching skill name, then follow the step-by-step instructions it returns. " +
+          "Use skill-resource to read supporting files (scripts, templates, references) within a skill directory. " +
+          "Consult skill://index.json to discover all available skills and their descriptions.",
+        capabilities: {
+          tools: { listChanged: !isStatic },
+          resources: { subscribe: true, listChanged: true },
+          prompts: { listChanged: !isStatic },
+          // SEP-2640 (Skills Extension): https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2640
+          extensions: {
+            "io.modelcontextprotocol/skills": {},
+            "io.modelcontextprotocol/ui": {},
+          },
+        },
       }
+    );
 
-      // Sync any GitHub repos
-      let newGithubDirs: string[] = [];
-      if (allowedGithubSpecs.length > 0) {
-        console.error(`Syncing ${allowedGithubSpecs.length} GitHub repo(s)...`);
-        const syncOptions: SyncOptions = {
-          cacheDir: freshGithubConfig.cacheDir,
-          token: freshGithubConfig.token,
-          shallowClone: true,
-        };
-        const results = await syncAllRepos(allowedGithubSpecs, syncOptions);
-        for (const result of results) {
-          if (!result.error) {
-            newGithubDirs.push(result.localPath);
+    const localSubscriptionManager = createSubscriptionManager();
+
+    // Register tools, resources, and prompts against this server instance.
+    const skillTool = registerSkillTool(server, skillState);
+    registerSkillResources(server, skillState);
+    const promptRegistry = registerSkillPrompts(server, skillState);
+    registerSubscriptionHandlers(server, skillState, localSubscriptionManager);
+
+    const registeredServer: RegisteredSkilljackServer = {
+      server,
+      skillTool,
+      promptRegistry,
+      subscriptionManager: localSubscriptionManager,
+    };
+    registeredServer.dispose = () => {
+      registeredServers.delete(registeredServer);
+    };
+    registeredServers.add(registeredServer);
+
+    // Register skill-config tool for UI-based directory configuration.
+    // Skip in static mode since skills list is frozen.
+    if (!isStatic) {
+      registerSkillConfigTool(server, skillState, async () => {
+        // Callback when directories or GitHub settings change via UI.
+        // Reload directories from config and refresh all active sessions.
+        const newPaths = getActiveDirectories();
+        const { localDirs: newLocalDirs, githubSpecs: newGithubSpecs } = classifyPaths(newPaths);
+
+        // Get fresh GitHub config (in case allowed orgs/users changed).
+        const freshGithubConfig = getGitHubConfig();
+
+        // Filter GitHub specs by allowlist and sync.
+        const allowedGithubSpecs: GitHubRepoSpec[] = [];
+        for (const spec of newGithubSpecs) {
+          if (isRepoAllowed(spec, freshGithubConfig)) {
+            allowedGithubSpecs.push(spec);
+          } else {
+            console.error(`Blocked: ${spec.owner}/${spec.repo} not in allowed orgs/users.`);
           }
         }
-        console.error(`Successfully synced ${newGithubDirs.length}/${allowedGithubSpecs.length} repo(s)`);
-      }
 
-      // Update current state
-      currentGithubSpecs = allowedGithubSpecs;
-      githubDirs = newGithubDirs;
-      // Include bundled skills (last, so user skills take precedence)
-      currentSkillsDirs = [...newLocalDirs, ...newGithubDirs, ...(hasBundledSkills ? [bundledSkillsDir] : [])];
-      currentSourceMap = buildDirectorySourceMap(
-        newLocalDirs,
-        allowedGithubSpecs,
-        freshGithubConfig.cacheDir,
-        hasBundledSkills ? bundledSkillsDir : undefined
-      );
+        // Sync any GitHub repos.
+        let newGithubDirs: string[] = [];
+        if (allowedGithubSpecs.length > 0) {
+          console.error(`Syncing ${allowedGithubSpecs.length} GitHub repo(s)...`);
+          const syncOptions: SyncOptions = {
+            cacheDir: freshGithubConfig.cacheDir,
+            token: freshGithubConfig.token,
+            shallowClone: true,
+          };
+          const results = await syncAllRepos(allowedGithubSpecs, syncOptions);
+          for (const result of results) {
+            if (!result.error) {
+              newGithubDirs.push(result.localPath);
+            }
+          }
+          console.error(`Successfully synced ${newGithubDirs.length}/${allowedGithubSpecs.length} repo(s)`);
+        }
 
-      console.error(`Config changed via UI. Directories: ${currentSkillsDirs.join(", ") || "(none)"}`);
-      refreshSkills(currentSkillsDirs, server, skillTool, promptRegistry, subscriptionManager);
-    });
+        // Update current shared state.
+        currentGithubSpecs = allowedGithubSpecs;
+        githubDirs = newGithubDirs;
+        // Include bundled skills last, so user skills take precedence.
+        currentSkillsDirs = [...newLocalDirs, ...newGithubDirs, ...(hasBundledSkills ? [bundledSkillsDir] : [])];
+        currentSourceMap = buildDirectorySourceMap(
+          newLocalDirs,
+          allowedGithubSpecs,
+          freshGithubConfig.cacheDir,
+          hasBundledSkills ? bundledSkillsDir : undefined
+        );
 
-    // Register skill-display tool for UI-based invocation settings
-    registerSkillDisplayTool(server, skillState, () => {
-      // Callback when invocation settings change via UI
-      // Refresh skills to apply new overrides
-      console.error("Invocation settings changed via UI. Refreshing skills...");
-      refreshSkills(currentSkillsDirs, server, skillTool, promptRegistry, subscriptionManager);
-    });
-  }
+        console.error(`Config changed via UI. Directories: ${currentSkillsDirs.join(", ") || "(none)"}`);
+        refreshAllServers();
+      });
 
-  // Set up file watchers for skill directory changes (skip in static mode)
+      // Register skill-display tool for UI-based invocation settings.
+      registerSkillDisplayTool(server, skillState, () => {
+        // Callback when invocation settings change via UI.
+        console.error("Invocation settings changed via UI. Refreshing skills...");
+        refreshAllServers();
+      });
+    }
+
+    return registeredServer;
+  };
+
+  // Set up file watchers for skill directory changes once per process (skip in static mode).
   if (!isStatic && currentSkillsDirs.length > 0) {
-    watchSkillDirectories(currentSkillsDirs, server, skillTool, promptRegistry, subscriptionManager);
+    watchSkillDirectories(currentSkillsDirs, refreshAllServers);
   }
 
-  // Set up GitHub polling for updates (skip in static mode)
+  // Set up GitHub polling for updates once per process (skip in static mode).
   let pollingManager: PollingManager | null = null;
   if (!isStatic && currentGithubSpecs.length > 0 && githubConfig.pollIntervalMs > 0) {
     const syncOptions: SyncOptions = {
@@ -841,7 +927,7 @@ async function main() {
       intervalMs: githubConfig.pollIntervalMs,
       onUpdate: (spec, result) => {
         console.error(`GitHub update detected for ${spec.owner}/${spec.repo}`);
-        refreshSkills(currentSkillsDirs, server, skillTool, promptRegistry, subscriptionManager);
+        refreshAllServers();
       },
       onError: (spec, error) => {
         console.error(`GitHub polling error for ${spec.owner}/${spec.repo}: ${error.message}`);
@@ -853,12 +939,14 @@ async function main() {
 
   const transportMode = getTransportMode();
   if (transportMode === "http") {
-    await connectHttp(async () => server);
+    await connectHttp(createRegisteredServer);
   } else {
+    const registeredServer = await createRegisteredServer();
     const transport = new StdioServerTransport();
-    await server.connect(transport);
+    await registeredServer.server.connect(transport);
     console.error("Skilljack ready over stdio. I know kung fu.");
   }
+
 }
 
 // Only run main() when executed directly (not when imported by tests)
