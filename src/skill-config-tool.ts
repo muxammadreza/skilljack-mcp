@@ -37,7 +37,7 @@ import { isGitHubUrl, parseGitHubUrl } from "./github-config.js";
 /**
  * Resource URI for the skill-config UI.
  */
-const RESOURCE_URI = "ui://skill-config/v2/mcp-app.html";
+const RESOURCE_URI = "ui://skill-config/v3/mcp-app.html";
 
 /**
  * Get the path to the bundled UI HTML file.

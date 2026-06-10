@@ -25,8 +25,8 @@ describe("skill-config-tool", () => {
     const mainConfigTool = registeredTools.find((t) => t.name === "skill-config");
 
     expect(mainConfigTool).toBeDefined();
-    expect(mainConfigTool?.config._meta?.ui?.resourceUri).toBe("ui://skill-config/v2/mcp-app.html");
-    expect(mainConfigTool?.config._meta?.["openai/outputTemplate"]).toBe("ui://skill-config/v2/mcp-app.html");
+    expect(mainConfigTool?.config._meta?.ui?.resourceUri).toBe("ui://skill-config/v3/mcp-app.html");
+    expect(mainConfigTool?.config._meta?.["openai/outputTemplate"]).toBe("ui://skill-config/v3/mcp-app.html");
     expect(mainConfigTool?.config._meta?.["openai/widgetAccessible"]).toBe(true);
     expect(mainConfigTool?.config._meta?.["openai/toolInvocation/invoking"]).toBe("Opening skills configuration...");
     expect(mainConfigTool?.config._meta?.["openai/toolInvocation/invoked"]).toBe("Skills configuration opened");
@@ -47,7 +47,7 @@ describe("skill-config-tool", () => {
 
     expect(helperTools.length).toBeGreaterThan(0);
     for (const tool of helperTools) {
-      expect(tool.config._meta?.ui?.resourceUri).toBe("ui://skill-config/v2/mcp-app.html");
+      expect(tool.config._meta?.ui?.resourceUri).toBe("ui://skill-config/v3/mcp-app.html");
       expect(tool.config._meta?.ui?.visibility).toEqual(["app"]);
       expect(tool.config._meta?.["openai/outputTemplate"]).toBeUndefined();
     }

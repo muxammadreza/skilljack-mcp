@@ -36,6 +36,54 @@ let skills: SkillDisplayInfo[] = [];
 let searchQuery = "";
 let app: App | null = null;
 
+
+function extractStructuredContent(payload: unknown): unknown {
+  const value = payload as Record<string, unknown> | null | undefined;
+  if (!value) return undefined;
+  if ("structuredContent" in value) return value.structuredContent;
+  const detail = value.detail as Record<string, unknown> | undefined;
+  const globals = detail?.globals as Record<string, unknown> | undefined;
+  const out = (value.toolOutput ?? globals?.toolOutput) as Record<string, unknown> | undefined;
+  if (out) return "structuredContent" in out ? out.structuredContent : out;
+  return undefined;
+}
+
+function installToolResultListeners(applyState: (structuredContent: unknown) => void): void {
+  const applyPayload = (payload: unknown) => {
+    const structuredContent = extractStructuredContent(payload);
+    if (structuredContent) applyState(structuredContent);
+  };
+  const bridge = (window as unknown as { openai?: { toolOutput?: unknown } }).openai;
+  applyPayload(bridge?.toolOutput);
+  window.addEventListener("openai:set_globals", (event) => applyPayload(event as CustomEvent), { passive: true });
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (message.method === "ui/notifications/tool-result") applyPayload(message.params);
+  }, { passive: true });
+}
+
+
+async function callHostTool(name: string, args: Record<string, unknown>): Promise<{ structuredContent?: unknown; [key: string]: unknown }> {
+  try {
+    if (app) return await app.callServerTool({ name, arguments: args }) as { structuredContent?: unknown; [key: string]: unknown };
+  } catch (error) {
+    const bridge = (window as unknown as { openai?: Record<string, unknown> }).openai;
+    const legacyCall = bridge?.["call" + "Tool"] as ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
+    if (!legacyCall) throw error;
+    console.warn("Standard MCP Apps tool call failed; using compatibility bridge", error);
+    return await legacyCall(name, args) as { structuredContent?: unknown; [key: string]: unknown };
+  }
+
+  const bridge = (window as unknown as { openai?: Record<string, unknown> }).openai;
+  const legacyCall = bridge?.["call" + "Tool"] as ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
+  if (legacyCall) return await legacyCall(name, args) as { structuredContent?: unknown; [key: string]: unknown };
+
+  throw new Error("No MCP Apps host bridge is available for tool calls.");
+}
+
+
 // DOM Elements
 const skillList = document.getElementById("skill-list")!;
 const stats = document.getElementById("stats")!;
@@ -230,10 +278,7 @@ async function updateInvocation(
   value: boolean
 ) {
   try {
-    const result = await app!.callServerTool({
-      name: "skill-display-update-invocation",
-      arguments: { skillName, setting, value },
-    });
+    const result = await callHostTool("skill-display-update-invocation", { skillName, setting, value });
 
     console.log("Update result:", result);
 
@@ -253,10 +298,7 @@ async function updateInvocation(
 // Reset override
 async function resetOverride(skillName: string) {
   try {
-    const result = await app!.callServerTool({
-      name: "skill-display-reset-override",
-      arguments: { skillName },
-    });
+    const result = await callHostTool("skill-display-reset-override", { skillName });
 
     console.log("Reset result:", result);
 
@@ -311,8 +353,9 @@ app.ontoolinput = (params) => {
 
 app.ontoolresult = (result) => {
   console.info("Received tool result:", result);
-  if (result.structuredContent) {
-    updateState(result.structuredContent as SkillDisplayState);
+  const structuredContent = extractStructuredContent(result);
+  if (structuredContent) {
+    updateState(structuredContent as SkillDisplayState);
   }
 };
 
@@ -323,6 +366,8 @@ app.ontoolcancelled = (params) => {
 (app as any).onerror = console.error;
 
 app.onhostcontextchanged = handleHostContextChanged;
+
+installToolResultListeners((structuredContent) => updateState(structuredContent as SkillDisplayState));
 
 // 3. Connect to host
 app.connect().then(() => {

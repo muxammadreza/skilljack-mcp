@@ -28,7 +28,7 @@ import { SkillState } from "./skill-tool.js";
 /**
  * Resource URI for the skill-display UI.
  */
-const RESOURCE_URI = "ui://skill-display/v2/skill-display.html";
+const RESOURCE_URI = "ui://skill-display/v3/skill-display.html";
 
 /**
  * Get the path to the bundled UI HTML file.

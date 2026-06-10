@@ -38,6 +38,54 @@ let allowedOrgs: string[] = [];
 let allowedUsers: string[] = [];
 let app: App | null = null;
 
+
+function extractStructuredContent(payload: unknown): unknown {
+  const value = payload as Record<string, unknown> | null | undefined;
+  if (!value) return undefined;
+  if ("structuredContent" in value) return value.structuredContent;
+  const detail = value.detail as Record<string, unknown> | undefined;
+  const globals = detail?.globals as Record<string, unknown> | undefined;
+  const out = (value.toolOutput ?? globals?.toolOutput) as Record<string, unknown> | undefined;
+  if (out) return "structuredContent" in out ? out.structuredContent : out;
+  return undefined;
+}
+
+function installToolResultListeners(applyState: (structuredContent: unknown) => void): void {
+  const applyPayload = (payload: unknown) => {
+    const structuredContent = extractStructuredContent(payload);
+    if (structuredContent) applyState(structuredContent);
+  };
+  const bridge = (window as unknown as { openai?: { toolOutput?: unknown } }).openai;
+  applyPayload(bridge?.toolOutput);
+  window.addEventListener("openai:set_globals", (event) => applyPayload(event as CustomEvent), { passive: true });
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (message.method === "ui/notifications/tool-result") applyPayload(message.params);
+  }, { passive: true });
+}
+
+
+async function callHostTool(name: string, args: Record<string, unknown>): Promise<{ structuredContent?: unknown; [key: string]: unknown }> {
+  try {
+    if (app) return await app.callServerTool({ name, arguments: args }) as { structuredContent?: unknown; [key: string]: unknown };
+  } catch (error) {
+    const bridge = (window as unknown as { openai?: Record<string, unknown> }).openai;
+    const legacyCall = bridge?.["call" + "Tool"] as ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
+    if (!legacyCall) throw error;
+    console.warn("Standard MCP Apps tool call failed; using compatibility bridge", error);
+    return await legacyCall(name, args) as { structuredContent?: unknown; [key: string]: unknown };
+  }
+
+  const bridge = (window as unknown as { openai?: Record<string, unknown> }).openai;
+  const legacyCall = bridge?.["call" + "Tool"] as ((name: string, args: Record<string, unknown>) => Promise<unknown>) | undefined;
+  if (legacyCall) return await legacyCall(name, args) as { structuredContent?: unknown; [key: string]: unknown };
+
+  throw new Error("No MCP Apps host bridge is available for tool calls.");
+}
+
+
 // DOM Elements
 const directoryList = document.getElementById("directory-list")!;
 const stats = document.getElementById("stats")!;
@@ -232,10 +280,7 @@ async function setStaticModeEnabled(enabled: boolean) {
   staticModeToggle.disabled = true;
 
   try {
-    const result = await app!.callServerTool({
-      name: "skill-config-set-static-mode",
-      arguments: { enabled },
-    });
+    const result = await callHostTool("skill-config-set-static-mode", { enabled });
 
     console.log("Static mode result:", result);
 
@@ -276,10 +321,7 @@ async function addDirectory() {
   addSubmitBtn.textContent = "Adding...";
 
   try {
-    const result = await app!.callServerTool({
-      name: "skill-config-add-directory",
-      arguments: { directory: path },
-    });
+    const result = await callHostTool("skill-config-add-directory", { directory: path });
 
     console.log("Add result:", result);
 
@@ -316,10 +358,7 @@ function closeConfirmRemoveModal() {
 // Remove directory (called after confirmation)
 async function removeDirectory(path: string) {
   try {
-    const result = await app!.callServerTool({
-      name: "skill-config-remove-directory",
-      arguments: { directory: path },
-    });
+    const result = await callHostTool("skill-config-remove-directory", { directory: path });
 
     console.log("Remove result:", result);
 
@@ -379,10 +418,7 @@ async function addAllowedOrg() {
   addOrgSubmitBtn.textContent = "Adding...";
 
   try {
-    const result = await app!.callServerTool({
-      name: "skill-config-add-allowed-org",
-      arguments: { org },
-    });
+    const result = await callHostTool("skill-config-add-allowed-org", { org });
 
     console.log("Add org result:", result);
 
@@ -419,10 +455,7 @@ function closeConfirmRemoveOrgModal() {
 // Remove allowed org (called after confirmation)
 async function removeAllowedOrg(org: string) {
   try {
-    const result = await app!.callServerTool({
-      name: "skill-config-remove-allowed-org",
-      arguments: { org },
-    });
+    const result = await callHostTool("skill-config-remove-allowed-org", { org });
 
     console.log("Remove org result:", result);
 
@@ -547,8 +580,9 @@ app.ontoolinput = (params) => {
 
 app.ontoolresult = (result) => {
   console.info("Received tool result:", result);
-  if (result.structuredContent) {
-    updateState(result.structuredContent as ConfigState);
+  const structuredContent = extractStructuredContent(result);
+  if (structuredContent) {
+    updateState(structuredContent as ConfigState);
   }
 };
 
@@ -559,6 +593,8 @@ app.ontoolcancelled = (params) => {
 (app as any).onerror = console.error;
 
 app.onhostcontextchanged = handleHostContextChanged;
+
+installToolResultListeners((structuredContent) => updateState(structuredContent as ConfigState));
 
 // 3. Connect to host
 app.connect().then(() => {
