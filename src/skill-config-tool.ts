@@ -162,7 +162,12 @@ export function registerSkillConfigTool(
         allowedOrgs: z.array(z.string()),
         allowedUsers: z.array(z.string()),
       },
-      _meta: { ui: { resourceUri: RESOURCE_URI } },
+      _meta: {
+        ui: { resourceUri: RESOURCE_URI },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/toolInvocation/invoking": "Opening skills configuration...",
+        "openai/toolInvocation/invoked": "Skills configuration opened",
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -220,6 +225,9 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/toolInvocation/invoking": "Adding skills directory...",
+        "openai/toolInvocation/invoked": "Skills directory added",
       },
       annotations: {
         readOnlyHint: false,
@@ -299,6 +307,9 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/toolInvocation/invoking": "Removing skills directory...",
+        "openai/toolInvocation/invoked": "Skills directory removed",
       },
       annotations: {
         readOnlyHint: false,
@@ -371,6 +382,9 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"],
         },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/toolInvocation/invoking": "Adding allowed GitHub organization...",
+        "openai/toolInvocation/invoked": "Allowed GitHub organization added",
       },
       annotations: {
         readOnlyHint: false,
@@ -445,6 +459,9 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"],
         },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/toolInvocation/invoking": "Removing allowed GitHub organization...",
+        "openai/toolInvocation/invoked": "Allowed GitHub organization removed",
       },
       annotations: {
         readOnlyHint: false,
@@ -519,6 +536,9 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/toolInvocation/invoking": "Updating static mode setting...",
+        "openai/toolInvocation/invoked": "Static mode setting updated",
       },
       annotations: {
         readOnlyHint: false,

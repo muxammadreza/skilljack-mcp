@@ -556,7 +556,7 @@ app.ontoolcancelled = (params) => {
   console.info("Tool call cancelled:", params.reason);
 };
 
-app.onerror = console.error;
+(app as any).onerror = console.error;
 
 app.onhostcontextchanged = handleHostContextChanged;
 

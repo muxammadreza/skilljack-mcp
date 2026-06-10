@@ -575,6 +575,7 @@ async function main() {
         // SEP-2640 (Skills Extension): https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2640
         extensions: {
           "io.modelcontextprotocol/skills": {},
+          "io.modelcontextprotocol/ui": {},
         },
       },
     }
