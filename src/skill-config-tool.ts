@@ -162,7 +162,13 @@ export function registerSkillConfigTool(
         allowedOrgs: z.array(z.string()),
         allowedUsers: z.array(z.string()),
       },
-      _meta: { ui: { resourceUri: RESOURCE_URI } },
+      _meta: {
+        ui: { resourceUri: RESOURCE_URI },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/widgetAccessible": true,
+        "openai/toolInvocation/invoking": "Opening skills configuration...",
+        "openai/toolInvocation/invoked": "Skills configuration opened",
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -213,6 +219,9 @@ export function registerSkillConfigTool(
         })).optional(),
         activeSource: z.string().optional(),
         isOverridden: z.boolean().optional(),
+        staticMode: z.boolean().optional(),
+        allowedOrgs: z.array(z.string()).optional(),
+        allowedUsers: z.array(z.string()).optional(),
         error: z.string().optional(),
       },
       _meta: {
@@ -220,6 +229,8 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/toolInvocation/invoking": "Adding skills directory...",
+        "openai/toolInvocation/invoked": "Skills directory added",
       },
       annotations: {
         readOnlyHint: false,
@@ -292,6 +303,9 @@ export function registerSkillConfigTool(
         })).optional(),
         activeSource: z.string().optional(),
         isOverridden: z.boolean().optional(),
+        staticMode: z.boolean().optional(),
+        allowedOrgs: z.array(z.string()).optional(),
+        allowedUsers: z.array(z.string()).optional(),
         error: z.string().optional(),
       },
       _meta: {
@@ -299,6 +313,8 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/toolInvocation/invoking": "Removing skills directory...",
+        "openai/toolInvocation/invoked": "Skills directory removed",
       },
       annotations: {
         readOnlyHint: false,
@@ -363,7 +379,19 @@ export function registerSkillConfigTool(
       },
       outputSchema: {
         success: z.boolean(),
+        directories: z.array(z.object({
+          path: z.string(),
+          source: z.string(),
+          type: z.string(),
+          valid: z.boolean(),
+          allowed: z.boolean(),
+          skillCount: z.number().optional(),
+        })).optional(),
+        activeSource: z.string().optional(),
+        isOverridden: z.boolean().optional(),
+        staticMode: z.boolean().optional(),
         allowedOrgs: z.array(z.string()),
+        allowedUsers: z.array(z.string()).optional(),
         error: z.string().optional(),
       },
       _meta: {
@@ -371,6 +399,8 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"],
         },
+        "openai/toolInvocation/invoking": "Adding allowed GitHub organization...",
+        "openai/toolInvocation/invoked": "Allowed GitHub organization added",
       },
       annotations: {
         readOnlyHint: false,
@@ -437,7 +467,19 @@ export function registerSkillConfigTool(
       },
       outputSchema: {
         success: z.boolean(),
+        directories: z.array(z.object({
+          path: z.string(),
+          source: z.string(),
+          type: z.string(),
+          valid: z.boolean(),
+          allowed: z.boolean(),
+          skillCount: z.number().optional(),
+        })).optional(),
+        activeSource: z.string().optional(),
+        isOverridden: z.boolean().optional(),
+        staticMode: z.boolean().optional(),
         allowedOrgs: z.array(z.string()),
+        allowedUsers: z.array(z.string()).optional(),
         error: z.string().optional(),
       },
       _meta: {
@@ -445,6 +487,8 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"],
         },
+        "openai/toolInvocation/invoking": "Removing allowed GitHub organization...",
+        "openai/toolInvocation/invoked": "Allowed GitHub organization removed",
       },
       annotations: {
         readOnlyHint: false,
@@ -519,6 +563,8 @@ export function registerSkillConfigTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/toolInvocation/invoking": "Updating static mode setting...",
+        "openai/toolInvocation/invoked": "Static mode setting updated",
       },
       annotations: {
         readOnlyHint: false,
@@ -583,7 +629,7 @@ export function registerSkillConfigTool(
             _meta: {
               ui: {
                 prefersBorder: true,
-                domain: "https://skilljack.dev",
+                ...(process.env.SKILLJACK_WIDGET_DOMAIN ? { domain: process.env.SKILLJACK_WIDGET_DOMAIN } : {}),
                 csp: {
                   connectDomains: [],
                   resourceDomains: [],

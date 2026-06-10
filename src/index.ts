@@ -20,8 +20,11 @@
  *             remain fully dynamic.
  */
 
+import { randomUUID } from "node:crypto";
+import { createServer, IncomingMessage, ServerResponse } from "node:http";
 import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import chokidar from "chokidar";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -171,6 +174,172 @@ export function getStaticMode(): boolean {
 
   // Check config file (lowest priority)
   return getStaticModeFromConfig();
+}
+
+export type SkilljackTransportMode = "stdio" | "http";
+
+/**
+ * Select the MCP transport mode.
+ *
+ * stdio remains the default for desktop MCP clients. ChatGPT connectors require
+ * a reachable Streamable HTTP endpoint, enabled via --http or SKILLJACK_TRANSPORT=http.
+ */
+export function getTransportMode(): SkilljackTransportMode {
+  const args = process.argv.slice(2);
+  const envValue = process.env.SKILLJACK_TRANSPORT?.toLowerCase();
+
+  if (args.includes("--http") || args.includes("--streamable-http")) {
+    return "http";
+  }
+
+  const transportArg = args.find((arg) => arg.startsWith("--transport="));
+  if (transportArg) {
+    const value = transportArg.split("=", 2)[1]?.toLowerCase();
+    if (value === "http" || value === "streamable-http") {
+      return "http";
+    }
+    if (value === "stdio") {
+      return "stdio";
+    }
+  }
+
+  if (envValue === "http" || envValue === "streamable-http") {
+    return "http";
+  }
+
+  return "stdio";
+}
+
+function getHttpHost(): string {
+  return process.env.SKILLJACK_HOST || "127.0.0.1";
+}
+
+function getHttpPort(): number {
+  const rawPort = process.env.SKILLJACK_PORT || process.env.PORT || "3099";
+  const port = Number.parseInt(rawPort, 10);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`Invalid HTTP port: ${rawPort}`);
+  }
+  return port;
+}
+
+function getMcpPath(): string {
+  const rawPath = process.env.SKILLJACK_MCP_PATH || "/mcp";
+  return rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
+}
+
+function jsonResponse(res: ServerResponse, status: number, body: unknown): void {
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json");
+  res.end(JSON.stringify(body));
+}
+
+function notFound(res: ServerResponse): void {
+  jsonResponse(res, 404, { error: "not_found" });
+}
+
+type SkilljackServerFactory = () => Promise<McpServer>;
+
+interface HttpSession {
+  server: McpServer;
+  transport: StreamableHTTPServerTransport;
+}
+
+function getHeaderValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function handleHttpRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  mcpPath: string,
+  sessions: Map<string, HttpSession>,
+  createServerForSession: SkilljackServerFactory
+): Promise<void> {
+  const baseUrl = `http://${req.headers.host || "localhost"}`;
+  const url = new URL(req.url || "/", baseUrl);
+
+  if (url.pathname === "/healthz") {
+    jsonResponse(res, 200, { ok: true, transport: "http", path: mcpPath });
+    return;
+  }
+
+  if (url.pathname !== mcpPath) {
+    notFound(res);
+    return;
+  }
+
+  const sessionId = getHeaderValue(req.headers["mcp-session-id"]);
+  let session = sessionId ? sessions.get(sessionId) : undefined;
+
+  if (!session && req.method === "POST") {
+    session = await createHttpSession(sessions, createServerForSession);
+  }
+
+  if (!session) {
+    jsonResponse(res, 400, {
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Bad Request: No valid MCP session ID provided" },
+      id: null,
+    });
+    return;
+  }
+
+  await session.transport.handleRequest(req, res);
+}
+
+async function createHttpSession(
+  sessions: Map<string, HttpSession>,
+  createServerForSession: SkilljackServerFactory
+): Promise<HttpSession> {
+  let session: HttpSession;
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: () => randomUUID(),
+    onsessioninitialized: (sessionId) => {
+      sessions.set(sessionId, session);
+    },
+  });
+  const server = await createServerForSession();
+  session = { server, transport };
+
+  transport.onclose = () => {
+    if (transport.sessionId) {
+      sessions.delete(transport.sessionId);
+    }
+  };
+
+  await server.connect(transport);
+  return session;
+}
+
+async function connectHttp(createServerForSession: SkilljackServerFactory): Promise<void> {
+  const host = getHttpHost();
+  const port = getHttpPort();
+  const mcpPath = getMcpPath();
+  const sessions = new Map<string, HttpSession>();
+
+  const httpServer = createServer((req, res) => {
+    handleHttpRequest(req, res, mcpPath, sessions, createServerForSession).catch((error: unknown) => {
+      console.error("Error handling MCP HTTP request:", error);
+      if (!res.headersSent) {
+        jsonResponse(res, 500, {
+          jsonrpc: "2.0",
+          error: { code: -32603, message: "Internal server error" },
+          id: null,
+        });
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(port, host, () => {
+      httpServer.off("error", reject);
+      resolve();
+    });
+  });
+
+  console.error(`Skilljack HTTP MCP endpoint ready at http://${host}:${port}${mcpPath}`);
 }
 
 /**
@@ -575,6 +744,7 @@ async function main() {
         // SEP-2640 (Skills Extension): https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2640
         extensions: {
           "io.modelcontextprotocol/skills": {},
+          "io.modelcontextprotocol/ui": {},
         },
       },
     }
@@ -681,10 +851,14 @@ async function main() {
     pollingManager.start();
   }
 
-  // Connect via stdio transport
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Skilljack ready. I know kung fu.");
+  const transportMode = getTransportMode();
+  if (transportMode === "http") {
+    await connectHttp(async () => server);
+  } else {
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("Skilljack ready over stdio. I know kung fu.");
+  }
 }
 
 // Only run main() when executed directly (not when imported by tests)

@@ -160,7 +160,13 @@ export function registerSkillDisplayTool(
         })),
         totalCount: z.number(),
       },
-      _meta: { ui: { resourceUri: RESOURCE_URI } },
+      _meta: {
+        ui: { resourceUri: RESOURCE_URI },
+        "openai/outputTemplate": RESOURCE_URI,
+        "openai/widgetAccessible": true,
+        "openai/toolInvocation/invoking": "Opening skill list...",
+        "openai/toolInvocation/invoked": "Skill list opened",
+      },
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -218,6 +224,8 @@ export function registerSkillDisplayTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/toolInvocation/invoking": "Updating skill invocation settings...",
+        "openai/toolInvocation/invoked": "Skill invocation settings updated",
       },
       annotations: {
         readOnlyHint: false,
@@ -311,6 +319,8 @@ export function registerSkillDisplayTool(
           resourceUri: RESOURCE_URI,
           visibility: ["app"], // Hidden from model, UI can call it
         },
+        "openai/toolInvocation/invoking": "Resetting skill invocation settings...",
+        "openai/toolInvocation/invoked": "Skill invocation settings reset",
       },
       annotations: {
         readOnlyHint: false,
@@ -391,7 +401,7 @@ export function registerSkillDisplayTool(
             _meta: {
               ui: {
                 prefersBorder: true,
-                domain: "https://skilljack.dev",
+                ...(process.env.SKILLJACK_WIDGET_DOMAIN ? { domain: process.env.SKILLJACK_WIDGET_DOMAIN } : {}),
                 csp: {
                   connectDomains: [],
                   resourceDomains: [],

@@ -11,6 +11,11 @@
 **Environment Variables:**
 - `SKILLS_DIR` - Comma-separated list of skill directories
 - `SKILLJACK_STATIC` - Set to `true`, `1`, or `yes` to enable static mode
+- `SKILLJACK_TRANSPORT` - `stdio` by default; set to `http` or `streamable-http` for ChatGPT-compatible Streamable HTTP
+- `SKILLJACK_HOST` - HTTP bind host (default `127.0.0.1`)
+- `SKILLJACK_PORT` - HTTP bind port (default `3099`; `PORT` is also respected)
+- `SKILLJACK_MCP_PATH` - HTTP MCP endpoint path (default `/mcp`)
+- `SKILLJACK_WIDGET_DOMAIN` - Optional stable component origin for production UI resources
 - `MAX_FILE_SIZE_MB` - Maximum file size for skill resources (default: 1MB)
 
 **CLI Options:**
@@ -21,7 +26,7 @@
 
 ```
 src/
-├── index.ts           # Entry point, server setup, file watching, stdio transport
+├── index.ts           # Entry point, server setup, file watching, stdio + Streamable HTTP transports
 ├── skill-discovery.ts # YAML frontmatter parsing, XML generation
 ├── skill-tool.ts      # MCP tools: skill, skill-resource
 ├── skill-prompts.ts   # MCP Prompts: /skill with auto-completion, per-skill prompts

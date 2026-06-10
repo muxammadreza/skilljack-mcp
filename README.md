@@ -37,13 +37,21 @@ SKILLS_DIR=/path/to/skills skilljack-mcp
 
 # Static mode (no file watching)
 skilljack-mcp --static /path/to/skills
+
+# Streamable HTTP mode for ChatGPT connectors / remote MCP clients
+skilljack-mcp --http
+
+# Or via npm script after building
+npm run start:http
 ```
 
 ## Configuration and Skills Display UI
 
-This server comes along with a [MCP Apps](https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/)-based UI for clients that support it.  Instead of fiddling with config files or environment variables, you can just configure your skills locations and skill visiblity directly in your chat window.
+This server includes an MCP Apps UI for clients that support embedded MCP app resources. Instead of editing config files or environment variables manually, you can configure skill locations and skill visibility directly in your chat window.
 
-(Screenshots below are from Claude Desktop in dark mode.)
+For ChatGPT, run Skilljack as a Streamable HTTP MCP server and connect ChatGPT to the public HTTPS `/mcp` endpoint. See [docs/chatgpt-apps-sdk.md](docs/chatgpt-apps-sdk.md).
+
+(Screenshots below are from a dark-mode MCP client.)
 
 ![Skills Configuration UI](docs/images/skills-config-ui.png)
 
