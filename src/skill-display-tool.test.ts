@@ -25,8 +25,8 @@ describe("skill-display-tool", () => {
     const mainDisplayTool = registeredTools.find((t) => t.name === "skill-display");
 
     expect(mainDisplayTool).toBeDefined();
-    expect(mainDisplayTool?.config._meta?.ui?.resourceUri).toBe("ui://skill-display/v1/skill-display.html");
-    expect(mainDisplayTool?.config._meta?.["openai/outputTemplate"]).toBe("ui://skill-display/v1/skill-display.html");
+    expect(mainDisplayTool?.config._meta?.ui?.resourceUri).toBe("ui://skill-display/v2/skill-display.html");
+    expect(mainDisplayTool?.config._meta?.["openai/outputTemplate"]).toBe("ui://skill-display/v2/skill-display.html");
     expect(mainDisplayTool?.config._meta?.["openai/widgetAccessible"]).toBe(true);
     expect(mainDisplayTool?.config._meta?.["openai/toolInvocation/invoking"]).toBe("Opening skill list...");
     expect(mainDisplayTool?.config._meta?.["openai/toolInvocation/invoked"]).toBe("Skill list opened");
@@ -47,7 +47,7 @@ describe("skill-display-tool", () => {
 
     expect(helperTools.length).toBeGreaterThan(0);
     for (const tool of helperTools) {
-      expect(tool.config._meta?.ui?.resourceUri).toBe("ui://skill-display/v1/skill-display.html");
+      expect(tool.config._meta?.ui?.resourceUri).toBe("ui://skill-display/v2/skill-display.html");
       expect(tool.config._meta?.ui?.visibility).toEqual(["app"]);
       expect(tool.config._meta?.["openai/outputTemplate"]).toBeUndefined();
     }

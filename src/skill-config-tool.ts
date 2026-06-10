@@ -37,7 +37,7 @@ import { isGitHubUrl, parseGitHubUrl } from "./github-config.js";
 /**
  * Resource URI for the skill-config UI.
  */
-const RESOURCE_URI = "ui://skill-config/v1/mcp-app.html";
+const RESOURCE_URI = "ui://skill-config/v2/mcp-app.html";
 
 /**
  * Get the path to the bundled UI HTML file.
@@ -163,7 +163,7 @@ export function registerSkillConfigTool(
         allowedUsers: z.array(z.string()),
       },
       _meta: {
-        ui: { resourceUri: RESOURCE_URI },
+        ui: { resourceUri: RESOURCE_URI, visibility: ["model", "app"] },
         "openai/outputTemplate": RESOURCE_URI,
         "openai/widgetAccessible": true,
         "openai/toolInvocation/invoking": "Opening skills configuration...",
@@ -613,7 +613,7 @@ export function registerSkillConfigTool(
   // Register the HTML UI resource
   registerAppResource(
     server,
-    RESOURCE_URI,
+    "skill-config-widget",
     RESOURCE_URI,
     { mimeType: RESOURCE_MIME_TYPE },
     async (): Promise<ReadResourceResult> => {
@@ -635,6 +635,12 @@ export function registerSkillConfigTool(
                   resourceDomains: [],
                 },
               },
+              "openai/widgetPrefersBorder": true,
+              "openai/widgetCSP": {
+                connect_domains: [],
+                resource_domains: [],
+              },
+              ...(process.env.SKILLJACK_WIDGET_DOMAIN ? { "openai/widgetDomain": process.env.SKILLJACK_WIDGET_DOMAIN } : {}),
               "openai/widgetDescription": "Configure skill directories and GitHub sources for Skilljack.",
             },
           },

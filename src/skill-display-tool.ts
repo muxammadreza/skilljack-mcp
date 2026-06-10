@@ -28,7 +28,7 @@ import { SkillState } from "./skill-tool.js";
 /**
  * Resource URI for the skill-display UI.
  */
-const RESOURCE_URI = "ui://skill-display/v1/skill-display.html";
+const RESOURCE_URI = "ui://skill-display/v2/skill-display.html";
 
 /**
  * Get the path to the bundled UI HTML file.
@@ -161,7 +161,7 @@ export function registerSkillDisplayTool(
         totalCount: z.number(),
       },
       _meta: {
-        ui: { resourceUri: RESOURCE_URI },
+        ui: { resourceUri: RESOURCE_URI, visibility: ["model", "app"] },
         "openai/outputTemplate": RESOURCE_URI,
         "openai/widgetAccessible": true,
         "openai/toolInvocation/invoking": "Opening skill list...",
@@ -385,7 +385,7 @@ export function registerSkillDisplayTool(
   // Register the HTML UI resource
   registerAppResource(
     server,
-    RESOURCE_URI,
+    "skill-display-widget",
     RESOURCE_URI,
     { mimeType: RESOURCE_MIME_TYPE },
     async (): Promise<ReadResourceResult> => {
@@ -407,6 +407,12 @@ export function registerSkillDisplayTool(
                   resourceDomains: [],
                 },
               },
+              "openai/widgetPrefersBorder": true,
+              "openai/widgetCSP": {
+                connect_domains: [],
+                resource_domains: [],
+              },
+              ...(process.env.SKILLJACK_WIDGET_DOMAIN ? { "openai/widgetDomain": process.env.SKILLJACK_WIDGET_DOMAIN } : {}),
               "openai/widgetDescription": "View available skills and configure invocation settings for Skilljack.",
             },
           },
